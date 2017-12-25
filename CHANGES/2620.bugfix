@@ -1,0 +1,1 @@
+DNSCache now returns random shuffle of IP addresses instead of round-robin generator.

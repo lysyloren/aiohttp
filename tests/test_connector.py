@@ -5,6 +5,7 @@ import gc
 import hashlib
 import os.path
 import platform
+import random
 import shutil
 import socket
 import ssl
@@ -1961,13 +1962,10 @@ class TestDNSCacheTable:
     def test_next_addrs(self, dns_cache_table):
         dns_cache_table.add('foo', ['127.0.0.1', '127.0.0.2'])
 
-        # max elements returned are the full list of addrs
-        addrs = list(dns_cache_table.next_addrs('foo'))
-        assert addrs == ['127.0.0.1', '127.0.0.2']
+        random.seed(1)
+        addrs = dns_cache_table.next_addrs('foo')
+        assert addrs == ['127.0.0.2', '127.0.0.1']
 
-        # different calls to next_addrs return the hosts using
-        # a round robin strategy.
+        random.seed(5)
         addrs = dns_cache_table.next_addrs('foo')
-        assert next(addrs) == '127.0.0.1'
-        addrs = dns_cache_table.next_addrs('foo')
-        assert next(addrs) == '127.0.0.2'
+        assert addrs == ['127.0.0.1', '127.0.0.2']
