@@ -225,10 +225,10 @@ disabled. The following snippet shows how the start and the end
 signals of a request flow can be followed::
 
     async def on_request_start(
-            session, trace_config_ctx, method, host, port, headers):
+            session, trace_config_ctx, params):
         print("Starting request")
 
-    async def on_request_end(session, trace_config_ctx, resp):
+    async def on_request_end(session, trace_config_ctx, params):
         print("Ending request")
 
     trace_config = aiohttp.TraceConfig()
@@ -259,10 +259,10 @@ share the state through to the different signals that belong to the
 same request and to the same :class:`TraceConfig` class, perhaps::
 
     async def on_request_start(
-            session, trace_config_ctx, method, host, port, headers):
+            session, trace_config_ctx, params):
         trace_config_ctx.start = session.loop.time()
 
-    async def on_request_end(session, trace_config_ctx, resp):
+    async def on_request_end(session, trace_config_ctx, params):
         elapsed = session.loop.time() - trace_config_ctx.start
         print("Request took {}".format(elapsed))
 
@@ -280,7 +280,7 @@ factory. This param is useful to pass data that is only available at
 request time, perhaps::
 
     async def on_request_start(
-            session, trace_config_ctx, method, host, port, headers):
+            session, trace_config_ctx, params):
         print(trace_config_ctx.trace_request_ctx)
 
 
@@ -381,9 +381,9 @@ SSL control for TCP sockets
 ---------------------------
 
 By default *aiohttp* uses strict checks for HTTPS protocol. Certification
-checks can be relaxed by setting *verify_ssl* to ``False``::
+checks can be relaxed by setting *ssl* to ``False``::
 
-  r = await session.get('https://example.com', verify_ssl=False)
+  r = await session.get('https://example.com', ssl=False)
 
 
 If you need to setup custom ssl parameters (use own certification
@@ -392,7 +392,7 @@ pass it into the proper :class:`ClientSession` method::
 
   sslcontext = ssl.create_default_context(
      cafile='/path/to/ca-bundle.crt')
-  r = await session.get('https://example.com', ssl_context=sslcontext)
+  r = await session.get('https://example.com', ssl=sslcontext)
 
 If you need to verify *self-signed* certificates, you can do the
 same thing as the previous example, but add another call to
@@ -402,7 +402,7 @@ same thing as the previous example, but add another call to
      cafile='/path/to/ca-bundle.crt')
   sslcontext.load_cert_chain('/path/to/client/public/device.pem',
                              '/path/to/client/private/device.jey')
-  r = await session.get('https://example.com', ssl_context=sslcontext)
+  r = await session.get('https://example.com', ssl=sslcontext)
 
 There is explicit errors when ssl verification fails
 
@@ -442,7 +442,7 @@ You may also verify certificates via *SHA256* fingerprint::
   exc = None
   try:
       r = await session.get('https://www.python.org',
-                            fingerprint=bad_fingerprint)
+                            ssl=aiohttp.Fingerprint(bad_fingerprint))
   except aiohttp.FingerprintMismatch as e:
       exc = e
   assert exc is not None
@@ -462,18 +462,9 @@ DER with e.g::
    Tip: to convert from a hexadecimal digest to a binary byte-string,
    you can use :func:`binascii.unhexlify`.
 
-   All *verify_ssl*, *fingerprint* and *ssl_context* could be passed
-   to :class:`TCPConnector` as defaults, params from
-   :meth:`ClientSession.get` and others override these defaults.
-
-.. warning::
-
-   *verify_ssl* and *ssl_context* params are *mutually exclusive*.
-
-   *MD5* and *SHA1* fingerprints are deprecated but still supported -- they
-   are famous as very insecure hash functions.
-
-
+   *ssl* parameter could be passed
+   to :class:`TCPConnector` as default, the value from
+   :meth:`ClientSession.get` and others override default.
 
 Proxy support
 -------------
@@ -507,8 +498,8 @@ constructor for extracting proxy configuration from
 *HTTP_PROXY* or *HTTPS_PROXY* *environment variables* (both are case
 insensitive)::
 
-   async with aiohttp.ClientSession() as session:
-       async with session.get("http://python.org", trust_env=True) as resp:
+   async with aiohttp.ClientSession(trust_env=True) as session:
+       async with session.get("http://python.org") as resp:
            print(resp.status)
 
 Proxy credentials are given from ``~/.netrc`` file if present (see

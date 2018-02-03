@@ -21,6 +21,8 @@ from urllib.parse import quote
 from urllib.request import getproxies
 
 import async_timeout
+import attr
+from multidict import MultiDict
 from yarl import URL
 
 from . import hdrs
@@ -30,7 +32,12 @@ from .log import client_logger
 
 __all__ = ('BasicAuth',)
 
-PY_36 = sys.version_info > (3, 6)
+PY_36 = sys.version_info >= (3, 6)
+
+if sys.version_info < (3, 7):
+    import idna_ssl
+    idna_ssl.patch_match_hostname()
+
 
 sentinel = object()
 NO_EXTENSIONS = bool(os.environ.get('AIOHTTP_NO_EXTENSIONS'))
@@ -141,7 +148,10 @@ def netrc_from_env():
     return netrc_obj
 
 
-ProxyInfo = namedtuple('ProxyInfo', 'proxy proxy_auth')
+@attr.s(frozen=True, slots=True)
+class ProxyInfo:
+    proxy = attr.ib(type=str)
+    proxy_auth = attr.ib(type=BasicAuth)
 
 
 def proxies_from_env():
@@ -187,7 +197,12 @@ def isasyncgenfunction(obj):
     return False
 
 
-MimeType = namedtuple('MimeType', 'type subtype suffix parameters')
+@attr.s(frozen=True, slots=True)
+class MimeType:
+    type = attr.ib(type=str)
+    subtype = attr.ib(type=str)
+    suffix = attr.ib(type=str)
+    parameters = attr.ib(type=MultiDict)
 
 
 def parse_mimetype(mimetype):
@@ -214,7 +229,7 @@ def parse_mimetype(mimetype):
             continue
         key, value = item.split('=', 1) if '=' in item else (item, '')
         params.append((key.lower().strip(), value.strip(' "')))
-    params = dict(params)
+    params = MultiDict(params)
 
     fulltype = parts[0].strip().lower()
     if fulltype == '*':
@@ -303,7 +318,7 @@ class AccessLogger(AbstractAccessLogger):
         'o': 'response_header',
     }
 
-    LOG_FORMAT = '%a %t "%r" %s %b "%{Referrer}i" "%{User-Agent}i"'
+    LOG_FORMAT = '%a %t "%r" %s %b "%{Referer}i" "%{User-Agent}i"'
     FORMAT_RE = re.compile(r'%(\{([A-Za-z0-9\-_]+)\}([ioe])|[atPrsbOD]|Tf?)')
     CLEANUP_RE = re.compile(r'(%[^s])')
     _FORMAT_CACHE = {}
@@ -657,6 +672,9 @@ class CeilTimeout(async_timeout.timeout):
 
 
 class HeadersMixin:
+
+    ATTRS = frozenset([
+        '_content_type', '_content_dict', '_stored_content_type'])
 
     _content_type = None
     _content_dict = None

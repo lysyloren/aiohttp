@@ -16,7 +16,17 @@ from .web_server import Server
 from .web_urldispatcher import PrefixedSubAppResource, UrlDispatcher
 
 
+__all__ = ('Application',)
+
+
 class Application(MutableMapping):
+    ATTRS = frozenset([
+        'logger', '_debug', '_router', '_loop', '_handler_args',
+        '_middlewares', '_middlewares_handlers', '_run_middlewares',
+        '_state', '_frozen', '_subapps',
+        '_on_response_prepare', '_on_startup', '_on_shutdown',
+        '_on_cleanup', '_client_max_size'])
+
     def __init__(self, *,
                  logger=web_logger,
                  router=None,
@@ -40,6 +50,8 @@ class Application(MutableMapping):
         self.logger = logger
 
         self._middlewares = FrozenList(middlewares)
+        self._middlewares_handlers = None  # initialized on freezing
+        self._run_middlewares = None  # initialized on freezing
         self._state = {}
         self._frozen = False
         self._subapps = []
@@ -49,6 +61,20 @@ class Application(MutableMapping):
         self._on_shutdown = Signal(self)
         self._on_cleanup = Signal(self)
         self._client_max_size = client_max_size
+
+    def __init_subclass__(cls):
+        warnings.warn("Inheritance class {} from web.Application "
+                      "is discouraged".format(cls.__name__),
+                      DeprecationWarning,
+                      stacklevel=2)
+
+    def __setattr__(self, name, val):
+        if name not in self.ATTRS:
+            warnings.warn("Setting custom web.Application.{} attribute "
+                          "is discouraged".format(name),
+                          DeprecationWarning,
+                          stacklevel=2)
+        super().__setattr__(name, val)
 
     # MutableMapping API
 
@@ -110,15 +136,25 @@ class Application(MutableMapping):
             return
 
         self._frozen = True
-        self._middlewares = tuple(self._prepare_middleware())
+        self._middlewares.freeze()
         self._router.freeze()
         self._on_response_prepare.freeze()
         self._on_startup.freeze()
         self._on_shutdown.freeze()
         self._on_cleanup.freeze()
+        self._middlewares_handlers = tuple(self._prepare_middleware())
+
+        # If current app and any subapp do not have middlewares avoid run all
+        # of the code footprint that it implies, which have a middleware
+        # hardcoded per app that sets up the current_app attribute. If no
+        # middlewares are configured the handler will receive the proper
+        # current_app without needing all of this code.
+        self._run_middlewares = True if self.middlewares else False
 
         for subapp in self._subapps:
             subapp.freeze()
+            self._run_middlewares =\
+                self._run_middlewares or subapp._run_middlewares
 
     @property
     def debug(self):
@@ -153,6 +189,7 @@ class Application(MutableMapping):
         self.router.register_resource(resource)
         self._reg_subapp_signals(subapp)
         self._subapps.append(subapp)
+        subapp.freeze()
         if self._loop is not None:
             subapp._set_loop(self._loop)
         return resource
@@ -241,6 +278,7 @@ class Application(MutableMapping):
                               'see #2252'.format(m),
                               DeprecationWarning, stacklevel=2)
                 yield m, False
+
         yield _fix_request_current_app(self), True
 
     async def _handle(self, request):
@@ -260,12 +298,14 @@ class Application(MutableMapping):
 
         if resp is None:
             handler = match_info.handler
-            for app in match_info.apps[::-1]:
-                for m, new_style in app._middlewares:
-                    if new_style:
-                        handler = partial(m, handler=handler)
-                    else:
-                        handler = await m(app, handler)
+
+            if self._run_middlewares:
+                for app in match_info.apps[::-1]:
+                    for m, new_style in app._middlewares_handlers:
+                        if new_style:
+                            handler = partial(m, handler=handler)
+                        else:
+                            handler = await m(app, handler)
 
             resp = await handler(request)
 

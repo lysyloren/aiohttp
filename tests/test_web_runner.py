@@ -8,12 +8,16 @@ from aiohttp import web
 
 
 @pytest.fixture
-def make_runner(loop):
+def app():
+    return web.Application()
+
+
+@pytest.fixture
+def make_runner(loop, app):
     asyncio.set_event_loop(loop)
     runners = []
 
     def go(**kwargs):
-        app = web.Application()
         runner = web.AppRunner(app, **kwargs)
         runners.append(runner)
         return runner
@@ -73,7 +77,7 @@ async def test_site_stop_not_started(make_runner):
 async def test_custom_log_format(make_runner):
     runner = make_runner(access_log_format='abc')
     await runner.setup()
-    assert runner._handler._kwargs['access_log_format'] == 'abc'
+    assert runner.server._kwargs['access_log_format'] == 'abc'
 
 
 async def test_unreg_site(make_runner):
@@ -82,3 +86,8 @@ async def test_unreg_site(make_runner):
     site = web.TCPSite(runner)
     with pytest.raises(RuntimeError):
         runner._unreg_site(site)
+
+
+async def test_app_property(make_runner, app):
+    runner = make_runner()
+    assert runner.app is app

@@ -14,6 +14,7 @@ from aiohttp import hdrs, web
 from aiohttp.client import ClientSession
 from aiohttp.client_reqrep import ClientRequest
 from aiohttp.connector import BaseConnector, TCPConnector
+from aiohttp.helpers import PY_36
 
 
 @pytest.fixture
@@ -468,30 +469,34 @@ async def test_request_tracing(loop):
     trace_config.on_request_end.append(on_request_end)
     trace_config.on_request_redirect.append(on_request_redirect)
 
-    session = aiohttp.ClientSession(loop=loop, trace_configs=[trace_config])
+    async with aiohttp.ClientSession(loop=loop,
+                                     trace_configs=[trace_config]) as session:
 
-    resp = await session.get(
-        'http://example.com',
-        trace_request_ctx=trace_request_ctx
-    )
+        async with await session.get(
+                'http://example.com',
+                trace_request_ctx=trace_request_ctx) as resp:
 
-    on_request_start.assert_called_once_with(
-        session,
-        trace_config_ctx,
-        hdrs.METH_GET,
-        URL("http://example.com"),
-        CIMultiDict()
-    )
+            on_request_start.assert_called_once_with(
+                session,
+                trace_config_ctx,
+                aiohttp.TraceRequestStartParams(
+                    hdrs.METH_GET,
+                    URL("http://example.com"),
+                    CIMultiDict()
+                )
+            )
 
-    on_request_end.assert_called_once_with(
-        session,
-        trace_config_ctx,
-        hdrs.METH_GET,
-        URL("http://example.com"),
-        CIMultiDict(),
-        resp
-    )
-    assert not on_request_redirect.called
+            on_request_end.assert_called_once_with(
+                session,
+                trace_config_ctx,
+                aiohttp.TraceRequestEndParams(
+                    hdrs.METH_GET,
+                    URL("http://example.com"),
+                    CIMultiDict(),
+                    resp
+                )
+            )
+            assert not on_request_redirect.called
 
 
 async def test_request_tracing_exception(loop):
@@ -523,10 +528,12 @@ async def test_request_tracing_exception(loop):
         on_request_exception.assert_called_once_with(
             session,
             mock.ANY,
-            hdrs.METH_GET,
-            URL("http://example.com"),
-            CIMultiDict(),
-            error
+            aiohttp.TraceRequestExceptionParams(
+                hdrs.METH_GET,
+                URL("http://example.com"),
+                CIMultiDict(),
+                error
+            )
         )
         assert not on_request_end.called
 
@@ -543,11 +550,8 @@ async def test_request_tracing_interpose_headers(loop):
     async def new_headers(
             session,
             trace_config_ctx,
-            method,
-            url,
-            headers,
-            trace_request_ctx=None):
-        headers['foo'] = 'bar'
+            data):
+        data.headers['foo'] = 'bar'
 
     trace_config = aiohttp.TraceConfig()
     trace_config.on_request_start.append(new_headers)
@@ -560,3 +564,17 @@ async def test_request_tracing_interpose_headers(loop):
 
     await session.get('http://example.com')
     assert MyClientRequest.headers['foo'] == 'bar'
+
+
+@pytest.mark.skipif(not PY_36,
+                    reason="Python 3.6+ required")
+def test_client_session_inheritance():
+    with pytest.warns(DeprecationWarning):
+        class A(ClientSession):
+            pass
+
+
+def test_client_session_custom_attr(loop):
+    session = ClientSession(loop=loop)
+    with pytest.warns(DeprecationWarning):
+        session.custom = None
